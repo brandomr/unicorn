@@ -1,0 +1,338 @@
+curl -XDELETE "http://localhost:9200/dossiers/" ; curl -XPUT "http://localhost:9200/dossiers/" 
+
+curl -XPUT http://localhost:9200/dossiers/attachment/_mapping -d '
+{
+      "attachment" : {
+        "properties" : {
+          "constant_score" : {
+            "properties" : {
+              "filter" : {
+                "properties" : {
+                  "term" : {
+                    "properties" : {
+                      "file" : {
+                        "type" : "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "entities" : {
+            "type" : "string"
+          },
+          "entity" : {
+            "properties" : {
+              "category" : {
+                "type" : "string"
+              },
+              "entity" : {
+                "type" : "string"
+              }
+            }
+          },
+          "file" : {
+            "type" : "attachment",
+            "path" : "full",
+            "fields" : {
+              "file" : {
+                "type" : "string",
+                "store" : true,
+                "term_vector" : "with_positions_offsets"
+              },
+              "author" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              },
+              "name" : {
+                "type" : "string"
+              },
+              "date" : {
+                "type" : "date",
+                "format" : "dateOptionalTime"
+              },
+              "keywords" : {
+                "type" : "string"
+              },
+              "content_type" : {
+                "type" : "string"
+              },
+              "content_length" : {
+                "type" : "integer"
+              },
+              "language" : {
+                "type" : "string"
+              }
+            }
+          },
+          "owner" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        }
+      }
+    }
+'
+
+curl 'localhost:9200/_cat/indices?v'
+
+curl -XGET 'http://localhost:9200/dossiers/_mapping/attachment?pretty'
+
+curl -XGET 'http://unicorn.ngrok.com:80/dossiers/_mapping/attachment?pretty'
+
+
+
+
+#################
+
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search?q=locations:*&pretty'
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+        "size" : 30000,
+        "query" : {
+            "query_string" : { "query" : "new york" }
+            }
+          }'
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+        "size" : 30000,
+        "filter" : {
+            "exists" : { "field" : "locations" }
+        }
+}'
+
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+        "_source": True,
+        "fields" : ["people","title"],
+        "query" : {
+            "term" : { "file" : "new york" }
+            },
+        "size": 100
+        }'
+
+
+
+
+curl -XPUT http://localhost:9200/test
+
+
+curl -XPUT http://localhost:9200/test/person/_mapping -d '{"person": {"properties": {"file": {"type": "attachment", "path": "full", "fields": {"file": {"type": "string", "term_vector":"with_positions_offsets", "store": true } } } } } }'
+
+
+
+#####################
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+		"fields": ["file"],
+        "query" : {
+            "query_string" : { "query" : "New York" }
+            }
+          }'
+
+
+curl -XGET 'http://localhost:9200/dossiers/attachment/AU3ZbJU8o8xBDuKeehuM'
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+        "size" : 30000,
+        "filter" : {
+            "term" : { "title" : "file1.pdf" }
+        }
+}'
+
+
+
+curl -XGET 'http://localhost:9200/dossiers/_search' -d '{
+            "fields": ["title", "file", "entities", "owner"],
+            "query": {
+                "filtered" : {
+                    "query" : {
+                        "query_string" : { "query" : "*" }
+                    },
+                    "filter" : {
+                        "term" : { "title" : "file15" }
+                    }
+                }
+            }
+            }'
+
+
+curl -XGET 'http://unicorn.ngrok.com:80/dossiers/attachment/_search' -d '{
+		"size" : 300,
+        "query" : {
+            "query_string" : { "query" : "and" }
+            }
+          }'
+
+curl -XGET 'http://unicorn.ngrok.com:80/dossiers/attachment/_search?q=file=and&pretty'
+
+e.g. "entity":[{"category":"Location","entity":"MAKOKO"}]
+
+e.g. "entities":["Ken Maggs"," x ","Secretariat","Massingir","Kobus De Wet","Otch Otto","Johan Jooste","Simon @Navarra","ECI","Frelimo","Lawforce","Justice @Nyimpini","rhino","Navarra"],
+
+"entity":[{"category":"National Park","entity":"KNP"}]}
+"entity":[{"category":"White rhino","entity":"Rhino Horn"}]}
+
+
+
+
+
+####################### UPDATED SYNTAX #######################
+
+curl -XDELETE "http://localhost:9200/dossiers/" ; curl -XPUT "http://localhost:9200/dossiers/" 
+
+curl -XPUT http://localhost:9200/dossiers/attachment/_mapping -d '
+{
+      "attachment" : {
+        "properties" : {
+          "constant_score" : {
+            "properties" : {
+              "filter" : {
+                "properties" : {
+                  "term" : {
+                    "properties" : {
+                      "file" : {
+                        "type" : "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "entities" : {
+            "type" : "string"
+          },
+          "entities_new" : {
+            "properties" : {
+              "countries" : {
+                "properties" : {
+                  "country" : {
+                    "type" : "string"
+                  },
+                  "countrycode" : {
+                    "type" : "string"
+                  }
+                }
+              },
+              "error" : {
+                "type" : "string"
+              },
+              "locations" : {
+                "properties" : {
+                  "countrycode" : {
+                    "type" : "string"
+                  },
+                  "lat" : {
+                    "type" : "double"
+                  },
+                  "lon" : {
+                    "type" : "double"
+                  },
+                  "placename" : {
+                    "type" : "string"
+                  },
+                  "score" : {
+                    "type" : "double"
+                  },
+                  "searchterm" : {
+                    "type" : "string"
+                  }
+                }
+              },
+              "module" : {
+                "type" : "string"
+              },
+              "organizations" : {
+                "index" : "not_analyzed",
+                "type" : "string"
+              },
+              "people" : {
+                "index" : "not_analyzed",
+                "type" : "string"
+              },
+              "traceback" : {
+                "type" : "string"
+              }
+            }
+          },
+          "locs": {
+          		"geohash": true, 
+          		"type": "geo_point"
+          		},
+          "date": {
+          		"format": "dateOptionalTime", 
+          		"type": "date"
+          },
+          "body": {
+          		"type": "string"
+          },
+          "entity" : {
+            "properties" : {
+              "category" : {
+                "type" : "string"
+              },
+              "entity" : {
+                "type" : "string"
+              }
+            }
+          },
+          "file" : {
+            "type" : "attachment",
+            "path" : "full",
+            "fields" : {
+              "file" : {
+                "type" : "string",
+                "store" : true,
+                "term_vector" : "with_positions_offsets"
+              },
+              "author" : {
+                "type" : "string"
+              },
+              "title" : {
+                "type" : "string"
+              },
+              "name" : {
+                "type" : "string"
+              },
+              "date" : {
+                "type" : "date"
+              },
+              "keywords" : {
+                "type" : "string"
+              },
+              "content_type" : {
+                "type" : "string"
+              },
+              "content_length" : {
+                "type" : "integer"
+              },
+              "language" : {
+                "type" : "string"
+              }
+            }
+          },
+          "owner" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          }
+        }
+      }
+    }'
+
+curl 'localhost:9200/_cat/indices?v'
+

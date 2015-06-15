@@ -13,6 +13,9 @@ from flask import send_file
 from flask.ext.login import (current_user, login_required, login_user,
         logout_user, confirm_login, fresh_login_required)
 from flask import Blueprint
+import hashlib
+import time
+
 
 from werkzeug import secure_filename
 import flask
@@ -43,9 +46,10 @@ import phonenumbers
 from phonenumbers import geocoder
 
 parent = os.path.dirname(os.path.realpath(__file__))
-sys.path.append('/home/gmueller/geodict') #change path to MITIE top level
+sys.path.append('/home/vagrant/geodict') #change path to MITIE top level
 
 import geodict_lib
+import ast
 
 DEFAULT_INDEX = 'dossiers'
 uni = Blueprint('unicorn', __name__, url_prefix='/unicorn')
@@ -85,6 +89,7 @@ def bulk_download_route():
 @uni.route('/<doc_id>/debug')
 @login_required
 def request_doc(doc_id):
+
     q = {
             "query" : {
                 "match" : {
@@ -94,6 +99,33 @@ def request_doc(doc_id):
             }
     response = es.search(body=q, index=DEFAULT_INDEX)
     return response
+
+
+def get_all_file(doc_id):
+    query=session['last_query']['query']
+    q_new = {
+            "fields": ["title", "highlight", "entities", "owner"],
+            "query": {
+                "filtered" : {
+                    "query" : {
+                        "query_string" : { "query" : query }
+                    },
+                    "filter" : {
+                        "term" : { "_id" : doc_id }
+                    }
+                }
+            },
+            "highlight" : { "fields": { "file": {"fragment_size" : 1000000000 } },
+                "pre_tags" : ["<span class='highlight'>"],
+                "post_tags" : ["</span>"]
+                }
+            }
+         
+    response = es.search(body=q_new, index=DEFAULT_INDEX)
+    return response
+
+
+
 
 def get_file(doc_id):
     ''' Render base64 encoded contents of a given file by its doc_id '''
@@ -124,10 +156,20 @@ def view_doc(doc_id):
     Displays pdf version of document, extracted entities,
     as well as other analytics. '''
 
-    if is_owner_of_doc(doc_id):
-        return render_template('doc-view.html', doc_id=doc_id)
-    else:
-        return abort(403)
+#    if is_owner_of_doc(doc_id):
+#        return render_template('doc-view.html', doc_id=doc_id)
+#    else:
+#        return abort(403)
+    text = get_all_file(doc_id)
+    print '##################'
+    print text
+    text = text['hits']['hits'][0]['highlight']['file'][0]
+    text = re.sub('\\n\\n', '\\n', text)
+    text = re.sub('\\n', '<br>', text)
+
+    return render_template('doc-view.html', doc_id = text)
+
+
 
 @uni.route('/pdf/<doc_id>')
 @login_required
@@ -165,20 +207,20 @@ def pdf_endpoint(doc_id):
 
         return out
 
-@uni.route('/topics/<doc_id>')
-def get_topics(doc_id):
-    topics=json.loads(open('/home/gmueller/unicorn/topics.json').read())
-    return json.dumps(topics['documents'][doc_id])
+#@uni.route('/topics/<doc_id>')
+#def get_topics(doc_id):
+#    topics=json.loads(open('/home/vagrant/unicorn/topics.json').read())
+#    return json.dumps(topics['documents'][doc_id])
 
-@uni.route('/all_topics')
-def alltopics():
-    topics=json.loads(open('/home/gmueller/unicorn/topics.json').read())
-    docs=len(topics['documents'])
-    dist={}
-    for idx,x in enumerate(np.bincount([np.argmax(item[1]) for item in topics['documents'].items()])):
-        dist['topic'+str(idx+1)]=float(x)/docs
-    topics['dist']=dist
-    return json.dumps(topics)
+#@uni.route('/all_topics')
+#def alltopics():
+#    topics=json.loads(open('/home/vagrant/unicorn/topics.json').read())
+#    docs=len(topics['documents'])
+#    dist={}
+#    for idx,x in enumerate(np.bincount([np.argmax(item[1]) for item in topics['documents'].items()])):
+#        dist['topic'+str(idx+1)]=float(x)/docs
+#    topics['dist']=dist
+#    return json.dumps(topics)
 
 
 @uni.route('/download/<doc_id>')
@@ -201,6 +243,7 @@ def search_preserve(query, page):
 @uni.route('/search/<query>/<page>')
 @login_required
 def search_endpoint(query=None, page=None, box_only=False):
+
     if not query and not page:
         last_query = session.get('last_query', None)
         if last_query:
@@ -232,13 +275,14 @@ def search_endpoint(query=None, page=None, box_only=False):
                 "post_tags" : ["</span>"]
                 }
             }
-    raw_response = es.search(body=q, index=DEFAULT_INDEX,
-            df="file",
-            size=10)
+    
+ 
+    raw_response = es.search(body=q, index=DEFAULT_INDEX, df="file", size=10)
 
     hits = []
 
     for resp in raw_response['hits']['hits']:
+        #print resp
         # Store returned ids
         session['last_query']['ids'].append(resp['_id'])
 
@@ -276,6 +320,7 @@ def root():
     user_struct = {
             'notifs': 0
             }
+    
     return render_template('index-dash.html', user=user_struct)
 
 @uni.route('/user')
@@ -296,16 +341,97 @@ def upload_form():
 def upload_endpoint():
     files = request.files.getlist('file[]')
     d = {}
+    count = 1
     for f in files:
         sf = secure_filename(f.filename)
+        
+        title_hash = hashlib.md5(sf).hexdigest()
 
         es_dict = {
                 'file': f.read().encode('base64'),
                 'title': sf,
-                'owner': current_owner.organization.organization
+                'owner': 'blank', #current_owner.organization.organization,
                 }
-        es.index(index=DEFAULT_INDEX, doc_type='attachment', body=es_dict)
+        
+        es.index(index=DEFAULT_INDEX, doc_type='attachment', id=title_hash, body=es_dict)
+            
+        #try to sleep so that the index can catch up....
+        time.sleep(2)
+
+
         f.close()
+
+        title = sf.split('.')[0]
+
+        q = {
+                "fields": ["title", "file", "entities", "owner", "_id"],
+                "query":{ 
+                    "ids":{ 
+                        "values": [ title_hash ]
+                    } 
+                } 
+            }
+
+        response = es.search(body=q, index=DEFAULT_INDEX)
+        #response = requests.get('http://localhost:9200/dossiers/attachment/'+ title_hash + '?fields=*title,file,entities,_id').json()
+
+        print 'item ####: ' + str(count)
+        text = response['hits']['hits'][0]['fields']['file'][0]
+        try:
+            date = get_date_simple(text)
+        except:
+            date = []
+        print date
+
+        # extract the subject line
+        subj = re.search('(subj.*?\: *)(.*?)(\\n)', text.lower())
+        subj = subj.groups()[1].title()
+
+
+        match = re.search('(subj.*?\\n)(.*)(Declassified/Released)', text.lower(), re.DOTALL)
+        try:
+            text = match.group() # get the body of the document
+        except:
+            text = text
+
+        body = text
+
+        # remove non-alphanumeric
+        text = re.sub(r'[\W\d]+', ' ', text)
+        print text
+
+
+
+        entities = requests.post('http://54.174.82.21:8080/extractor', data=json.dumps({"text":text})).text
+        entities = ast.literal_eval(entities)
+
+        print entities
+
+        locs = []
+        try:
+            locs = [[location['lon'],location['lat']] for location in entities['locations']]
+        except:
+            locs = []
+
+
+        update = {
+            "doc" : {
+                "entities_new" : entities, # add entities as field: entities_new
+                "title" : subj, # set title to subject line,
+                "locs" : locs, # add locs as geohash for kibana
+                "date" : date, # add extracted date
+                "body" : body, # add extracted body text
+               }
+            }
+
+        es.update(index='dossiers', doc_type='attachment', id=title_hash, body=update)
+        
+        count +=1
+        print
+
+
+
+
 
     return redirect(url_for('.root'))
 
@@ -320,6 +446,7 @@ def viz_all():
         "size": 100
         }
     r = es.search(body=q, index=DEFAULT_INDEX)
+    print r['hits']['hits']
     graph = document_graph(r['hits']['hits'])
 
     return json.dumps(graph)
@@ -329,24 +456,62 @@ def viz_all():
 @login_required
 def geo_endpoint():
     query=session['last_query']['query']
+    #print 'Query: ' + query
     url='http://localhost:9200/dossiers/_search'
-    q = {
-        "fields" : ["file"],
-        "query" : {
-            "term" : { "file" : query }
-            }
+
+    loc_q = {
+        "size" : 30000,
+        "filter" : {
+            "exists" : { "field" : "locations" }
         }
+    }
+
+    q = {
+        "size" : 30000,
+        "query" : {
+            "query_string" : { "query" : query }
+            }
+          }
     #r=requests.post(url,data=json.dumps(q))
     r=es.search(body=q,index=DEFAULT_INDEX)
     data=r
     locations=[]
+ #   for hit in data['hits']['hits']:
+ #       print hit['fields']['file'][0]
+ #       print
+ #       for location in geodict_lib.find_locations_in_text(re.sub('\s', ' ', hit['_source']['file'])):
+ #           for token in location['found_tokens']:
+ #               locations.append({'lat':token['lat'],'lon':token['lon'],'name':token['matched_string']})
+    
+    #geo=map(lambda x: x['found_tokens'])
+#    return json.dumps(locations)
+    #print 'Number of Hits: ' + str(len(data['hits']['hits']))
+
     for hit in data['hits']['hits']:
-        for location in geodict_lib.find_locations_in_text(re.sub('\s', ' ', str(hit['fields']['file']))):
-            for token in location['found_tokens']:
-                locations.append({'lat':token['lat'],'lon':token['lon'],'name':token['matched_string']})
+        #print hit
+        text = hit['_source']['file']
+        try: 
+            locs = hit['_source']['entities_new']['locations']
+        except:
+            locs = []
+
+
+       
+        try:
+            for location in locs:
+                locations.append({'lat':location['lat'],'lon':location['lon'],'name':location['placename']})
+        except: 
+            continue
+            # print 'no locations'
     
     #geo=map(lambda x: x['found_tokens'])
     return json.dumps(locations)
+
+
+
+
+
+
 
 
 
@@ -356,13 +521,13 @@ def geo_endpoint():
 def viz_endpoint(query):
     url='http://localhost:9200/dossiers/_search'
     q = {
-        "_source": ["entity"],
-        "fields" : ["entities","title"],
+        "size" : 30000,
         "query" : {
-            "term" : { "file" : query }
-            },
-        "size": 100
-        }
+            "query_string" : { "query" : query }
+            }
+          }
+
+    print q
     #r=requests.post(url,data=json.dumps(q))
     r=es.search(body=q,index=DEFAULT_INDEX)
     data=r
@@ -567,3 +732,256 @@ def is_owner(org):
 @app.errorhandler(403)
 def permission_denied(e):
     return render_template('permission-denied.html'), 403
+
+
+
+
+
+@uni.route('/mapsearch')
+@uni.route('/mapsearch/<query>')
+@uni.route('/mapsearch/<query>/<page>')
+@login_required
+def map_search_endpoint(query=None, page=None, box_only=False):
+    if not query and not page:
+        last_query = session.get('last_query', None)
+        if last_query:
+            query, page = last_query['query'], last_query['page']
+        else:
+            # better error
+            return abort(404)
+
+    if not page:
+        page = 1
+
+    session['last_query'] = {'query': query, 'page': page, 'ids': []}
+    # convert pages to records for ES
+    start = int(page)
+    if start > 1:
+        start *= 10
+
+    q = {
+            "fields": ["title", "highlight", "entities", "owner"],
+            "from": start,
+            "query" : {
+                "match" : {
+                    "file" : query
+                    }
+                },
+
+            "highlight": { "fields": { "file": { } },
+                "pre_tags" : ["<span class='highlight'>"],
+                "post_tags" : ["</span>"]
+                }
+            }
+    raw_response = es.search(body=q, index=DEFAULT_INDEX,
+            df="file",
+            size=10)
+
+    hits = []
+
+    for resp in raw_response['hits']['hits']:
+        print resp
+        # Store returned ids
+        session['last_query']['ids'].append(resp['_id'])
+
+        if is_owner(resp['fields']['owner'][0]):
+            # Flatten structure for individual hits
+            hits.append({'id': resp['_id'],
+                'title': resp['fields']['title'][0],
+                'highlight': resp['highlight']['file'][0],
+                'permissions': True
+                })
+        else:
+            hits.append({'id': resp['_id'],
+                'title': resp['fields']['title'][0],
+                'permissions': False
+                })
+
+
+    results = {
+            'hits': hits,
+            'took': float(raw_response['took'])/1000,
+            'total': "{:,}".format(raw_response['hits']['total']),
+            'total_int': int(raw_response['hits']['total']),
+            'query': query,
+            'from': int(page)
+            }
+
+    print jsonify(results)        
+    return json.dumps(results)
+
+
+
+@uni.route('/serve_geo', methods=['POST'])
+@login_required
+def serve_geo():   
+    print request.form   
+    results = json.dumps(request.form['results'])
+    print type(results)
+    print
+    return render_template('search-results-box.html', results=results)
+
+
+
+
+@uni.route('/serve_geo_new', methods=['POST'])
+@uni.route('/serve_geo_new/<query>', methods=['POST'])
+@uni.route('/serve_geo_new/<query>/<page>', methods=['POST'])
+@login_required
+def serve_geo_new(query=None, page=None, box_only=True, bounds={}):
+
+
+    if request.method == "POST":
+        json_dict = request.get_json()
+        print json_dict
+        print type(json_dict)
+        try: 
+            bounds = json_dict['bounds']['bounds']
+            southwest_lat = bounds['southwest_lat']
+            southwest_lon = bounds['southwest_lon']
+            northeast_lat = bounds['northeast_lat']
+            northeast_lon = bounds['northeast_lon']
+        
+        except:
+            southwest_lat = -84
+            southwest_lon = -170 
+            northeast_lat = 85 
+            northeast_lon =189
+
+    print json_dict
+    print 'running a new query...'
+
+    if not query and not page:
+        last_query = session.get('last_query', None)
+        if last_query:
+            query, page = last_query['query'], last_query['page']
+        else:
+            # better error
+            return abort(404)
+
+    if not page:
+        page = 1
+
+    session['last_query'] = {'query': query, 'page': page, 'ids': []}
+    # convert pages to records for ES
+    start = int(page)
+    if start > 1:
+        start *= 10
+
+    q = { 
+       "fields": ["title", "highlight", "entities", "owner", "body"], 
+       "query":{  
+          "filtered":{  
+             "query":{  
+                "match":{  
+                   "file": query
+                }
+             },
+             "filter":{  
+                "geo_bounding_box":{  
+                   "locs":{  
+                      "top_left":{  
+                         "lat": northeast_lat, # top_lat,
+                         "lon": southwest_lon, #top_lon
+                      },
+                      "bottom_right":{  
+                         "lat": southwest_lat, #bottom_lat,
+                         "lon": northeast_lon, #bottom_lon
+                      }
+                   }
+                }
+             }
+          }
+       },
+       "highlight":{  
+          "fields":{  
+             "file":{  
+
+             }
+          },
+          "pre_tags":[  
+             "<span class='highlight'>"
+          ],
+          "post_tags":[  
+             "</span>"
+          ]
+       }
+    }
+   
+    print q
+
+    raw_response = es.search(body=q, index=DEFAULT_INDEX,
+            df="file",
+            size=10)
+
+    hits = []
+
+    for resp in raw_response['hits']['hits']:
+        # Store returned ids
+        session['last_query']['ids'].append(resp['_id'])
+
+        text = resp['fields']['body'][0]
+        text = re.sub('\\n\\n', '\\n', text)
+        text = re.sub('\\n', '<br>', text)
+
+        if is_owner(resp['fields']['owner'][0]):
+            # Flatten structure for individual hits
+            hits.append({'id': resp['_id'],
+                'title': resp['fields']['title'][0],
+                'highlight': resp['highlight']['file'][0],
+                'permissions': True,
+                'body': text
+                })
+        else:
+            hits.append({'id': resp['_id'],
+                'title': resp['fields']['title'][0],
+                'permissions': False
+                })
+
+
+    results = {
+            'hits': hits,
+            'took': float(raw_response['took'])/1000,
+            'total': "{:,}".format(raw_response['hits']['total']),
+            'total_int': int(raw_response['hits']['total']),
+            'query': query,
+            'from': int(page)
+            }
+
+    print results
+
+    if box_only:
+        return render_template('search-results-map.html', results=results)
+
+    return render_template('search-template.html', results=results)
+
+
+
+
+
+
+
+
+def get_date(text):
+    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may':'05', 'jun':'06', 'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
+    date = re.search('(\d{1}|\d{2})(\d{4})( +| Z |Z| Z|Z | +)([A-Za-z]{3}) (\d{2})', text)
+    date_groups = date.groups()
+    date_dict = {}
+    if len(date_groups[0]) == 1:
+        date_dict['day'] ='0' + date_groups[0]
+    else:
+        date_dict['day'] = date_groups[0]
+    date_dict['hour'] = date_groups[1][:2]
+    date_dict['min'] = date_groups[1][2:4]
+    date_dict['month'] = months[date_groups[3].lower()]
+    date_dict['year'] = '19' + date_groups[4]
+    date_out = date_dict['year'] + '-' + date_dict['month'] + '-' + date_dict['day'] + 'T' + date_dict['hour'] + ':' + date_dict['min'] + ':00'
+
+    return date_out
+
+def get_date_simple(text):
+    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may':'05', 'jun':'06', 'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'}
+    date = re.search('(draft date: )(.*?)(\\n)', text.lower())
+    date = date.groups()[1].split(' ')
+    date_out = date[2] + '-' + months[date[1]] + '-' + date[0]
+    return date_out

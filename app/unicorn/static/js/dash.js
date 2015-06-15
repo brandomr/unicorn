@@ -647,6 +647,11 @@ function PrettyDates(){
 function SetMinBlockHeight(elem){
 	elem.css('min-height', window.innerHeight - 49)
 }
+
+function SetMinBlockHeightMap(elem){
+	elem.css('min-height', window.innerHeight/2)
+}
+
 //
 //  Helper for correct size of Messages page
 //

@@ -25,17 +25,31 @@ def document_graph(hits):
 
 
     for hit in hits:
+        print hit
         # Sane names for elasticsearch objects
         _id = hit['_id']
-        title = hit['fields']['title'][0]
+        title = hit['_source']['title']
         try:
-            sources = hit['_source']['entity']
+            sources_people = hit['_source']['entities_new']['people']
         except KeyError:
             # Result has no entities
             continue
-        
-        edges = {x['entity']: x['category'] for x in sources}
 
+        edges_people = {x:'person' for x in sources_people}
+
+
+        try:
+            sources_orgs = hit['_source']['entities_new']['organizations']
+        except KeyError:
+            # Result has no entities
+            continue
+
+        edges_orgs = {x:'organiation' for x in sources_orgs}
+
+        edges = edges_people.copy()
+        edges.update(edges_orgs)
+
+        print edges
         # Create node for the new document
         g.add_node(_id, dict(
             type = 'document',
@@ -67,10 +81,10 @@ def make_graph(data):
     for hits in data['hits']['hits']:
         temp=[]
         try:
-            for entity in hits['_source']['entity']:
+            for entity in hits['_source']['entities_new']['people']:
                 temp.append(entity['entity'])
                 g.add_node(entity['entity'], 
-                        dict(origin=hits['fields']['title'][0]))
+                        dict(origin=hits['_source']['title']))
 
             edges=combinations(temp,2)
             g.add_edges_from(list(edges))
