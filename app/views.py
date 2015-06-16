@@ -388,7 +388,7 @@ def upload_endpoint():
         subj = subj.groups()[1].title()
 
 
-        match = re.search('(subj.*?\\n)(.*)(Declassified/Released)', text.lower(), re.DOTALL)
+        match = re.search('(subj.*?\\n)(.*)(declassified/released)', text.lower(), re.DOTALL)
         try:
             text = match.group() # get the body of the document
         except:
@@ -733,93 +733,6 @@ def is_owner(org):
 def permission_denied(e):
     return render_template('permission-denied.html'), 403
 
-
-
-
-
-@uni.route('/mapsearch')
-@uni.route('/mapsearch/<query>')
-@uni.route('/mapsearch/<query>/<page>')
-@login_required
-def map_search_endpoint(query=None, page=None, box_only=False):
-    if not query and not page:
-        last_query = session.get('last_query', None)
-        if last_query:
-            query, page = last_query['query'], last_query['page']
-        else:
-            # better error
-            return abort(404)
-
-    if not page:
-        page = 1
-
-    session['last_query'] = {'query': query, 'page': page, 'ids': []}
-    # convert pages to records for ES
-    start = int(page)
-    if start > 1:
-        start *= 10
-
-    q = {
-            "fields": ["title", "highlight", "entities", "owner"],
-            "from": start,
-            "query" : {
-                "match" : {
-                    "file" : query
-                    }
-                },
-
-            "highlight": { "fields": { "file": { } },
-                "pre_tags" : ["<span class='highlight'>"],
-                "post_tags" : ["</span>"]
-                }
-            }
-    raw_response = es.search(body=q, index=DEFAULT_INDEX,
-            df="file",
-            size=10)
-
-    hits = []
-
-    for resp in raw_response['hits']['hits']:
-        print resp
-        # Store returned ids
-        session['last_query']['ids'].append(resp['_id'])
-
-        if is_owner(resp['fields']['owner'][0]):
-            # Flatten structure for individual hits
-            hits.append({'id': resp['_id'],
-                'title': resp['fields']['title'][0],
-                'highlight': resp['highlight']['file'][0],
-                'permissions': True
-                })
-        else:
-            hits.append({'id': resp['_id'],
-                'title': resp['fields']['title'][0],
-                'permissions': False
-                })
-
-
-    results = {
-            'hits': hits,
-            'took': float(raw_response['took'])/1000,
-            'total': "{:,}".format(raw_response['hits']['total']),
-            'total_int': int(raw_response['hits']['total']),
-            'query': query,
-            'from': int(page)
-            }
-
-    print jsonify(results)        
-    return json.dumps(results)
-
-
-
-@uni.route('/serve_geo', methods=['POST'])
-@login_required
-def serve_geo():   
-    print request.form   
-    results = json.dumps(request.form['results'])
-    print type(results)
-    print
-    return render_template('search-results-box.html', results=results)
 
 
 
