@@ -1,3 +1,4 @@
+
 from app import app, es, db, flask_bcrypt, login_manager
 from app import User, Organization
 from flask import jsonify
